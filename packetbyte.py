@@ -172,3 +172,87 @@ def generate_luau(packet_name: str, fields: list[FieldSpec], source_name: str) -
         "",
     ]
     return "\n".join(lines)
+
+def encode_lines(field: FieldSpec) -> list[str]:
+    name = field.name
+    kind = field.type_name
+    lines: list[str] = []
+    if kind in NUMERIC_TYPES:
+        suffix, width = NUMERIC_TYPES[kind]
+        lines += [f"\tbuffer.write{suffix}(b, offset, data.{name})", f"\toffset += {width}"]
+    elif kind == "bool":
+        lines += [f"\tbuffer.writeu8(b, offset, data.{name} and 1 or 0)", "\toffset += 1"]
+    elif kind in {"string", "bytes"}:
+        helper = "requireString" if kind == "string" else "requireBytes"
+        lines += [
+            f"\tlocal {name} = {helper}(data.{name}, {luau_string(name)})",
+            f"\tassert(#{name} <= 65535, {luau_string(name + ' exceeds 65535 bytes')})",
+            f"\tbuffer.writeu16(b, offset, #{name})",
+            "\toffset += 2",
+            f"\tbuffer.writestring(b, offset, {name})",
+            f"\toffset += #{name}",
+        ]
+    elif kind in {"vec2", "vec3"}:
+        dimensions = 2 if kind == "vec2" else 3
+        for index, component in enumerate(("X", "Y", "Z")[:dimensions]):
+            lines += [f"\tbuffer.writef32(b, offset, data.{name}.{component})", "\toffset += 4"]
+    return lines
+
+
+def decode_lines(field: FieldSpec) -> list[str]:
+    name = field.name
+    kind = field.type_name
+    lines: list[str] = []
+    if kind in NUMERIC_TYPES:
+        suffix, width = NUMERIC_TYPES[kind]
+        lines += [f"\tdata.{name} = buffer.read{suffix}(b, offset)", f"\toffset += {width}"]
+    elif kind == "bool":
+        lines += [f"\tdata.{name} = buffer.readu8(b, offset) ~= 0", "\toffset += 1"]
+    elif kind in {"string", "bytes"}:
+        lines += [
+            f"\tlocal {name}Length = buffer.readu16(b, offset)",
+            "\toffset += 2",
+            f"\tdata.{name} = buffer.readstring(b, offset, {name}Length)",
+            f"\toffset += {name}Length",
+        ]
+    elif kind in {"vec2", "vec3"}:
+        dimensions = 2 if kind == "vec2" else 3
+        components = ("X", "Y", "Z")[:dimensions]
+        for component in components:
+            lines += [
+                f"\tlocal {name}{component} = buffer.readf32(b, offset)",
+                "\toffset += 4",
+            ]
+        arguments = ", ".join(f"{name}{component}" for component in components)
+        lines.append(f"\tdata.{name} = Vector{dimensions}.new({arguments})")
+    return lines
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="packetbyte",
+        description="Compile a PacketByte JSON schema into a Luau buffer codec.",
+    )
+    parser.add_argument("schema", type=Path, help="input JSON schema")
+    parser.add_argument("-o", "--output", type=Path, required=True, help="output Luau module")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        packet_name, fields = load_schema(args.schema)
+        luau = generate_luau(packet_name, fields, args.schema.name)
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(luau, encoding="utf-8")
+    except SchemaError as exc:
+        parser.error(str(exc))
+    except OSError as exc:
+        parser.error(f"could not write output: {exc}")
+    print(f"Compiled {args.schema} -> {args.output}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
