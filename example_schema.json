@@ -1,0 +1,9 @@
+{
+  "name": "PlayerInput",
+  "fields": [
+    {"name": "sequence", "type": "u16"},
+    {"name": "move", "type": "vec2"},
+    {"name": "jump", "type": "bool"},
+    {"name": "action", "type": "string"}
+  ]
+}
