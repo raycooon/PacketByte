@@ -81,3 +81,32 @@ def load_schema(path: Path) -> tuple[str, list[FieldSpec]]:
         fields.append(FieldSpec(field_name, field_type))
 
     return packet_name, fields
+
+def validate_luau_identifier(value: str, label: str) -> None:
+    """Reject names that could escape a generated Luau identifier position."""
+    if not (value[0].isalpha() or value[0] == "_"):
+        raise fail(f"{label} must start with a letter or underscore")
+    if any(char not in IDENTIFIER_CHARS for char in value):
+        raise fail(f"{label} may contain only letters, digits, and underscores")
+    if value in {"and", "break", "do", "else", "elseif", "end", "false", "for", "function", "if", "in", "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while"}:
+        raise fail(f"{label} cannot be a Luau keyword")
+
+
+def fixed_width(field_type: str) -> int | None:
+    """Return a type's fixed byte width, or None for variable-length data."""
+    if field_type in NUMERIC_TYPES:
+        return NUMERIC_TYPES[field_type][1]
+    if field_type == "bool":
+        return 1
+    if field_type == "vec2":
+        return 8
+    if field_type == "vec3":
+        return 12
+    return None
+
+
+def luau_string(value: str) -> str:
+    """Quote a string for generated Luau source."""
+    return json.dumps(value, ensure_ascii=False)
+
+
